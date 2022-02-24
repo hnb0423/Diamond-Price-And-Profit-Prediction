@@ -1,4 +1,4 @@
-# Diamond-Price-And-Profit-Prediction
+# Project_4: Diamond-Price-And-Profit-Prediction
 Business problem:
 The goal of this project is to predict diamond trade price and generate most amount of profit with $5,000,000 budget. 
  
