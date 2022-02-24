@@ -42,13 +42,18 @@ Finally, I construct a scatterplot matrix to study relationships among variables
 
 ## Feature engineering:
 I take six steps to complete feature engineering.
+
 Step 1: Re-categorize columns
-	I notice that columns “Color,” “Clarity,” “Symmetry,” “Shape,” and “Polish” either have different categories or have typos for the training and offers datasets. So, I need to resolve this mismatch issue through re-categorization. I only keep top frequent categories for each column and replace the rest with “Other” categories. I also correct typos in “Shape” column. 
+
+I notice that columns “Color,” “Clarity,” “Symmetry,” “Shape,” and “Polish” either have different categories or have typos for the training and offers datasets. So, I need to resolve this mismatch issue through re-categorization. I only keep top frequent categories for each column and replace the rest with “Other” categories. I also correct typos in “Shape” column. 
 
 Step 2: Create dummy variables for both datasets 
+
 I dummy code all categorical variables in both datasets.
+
 Step 3& 4& 5 & 6:
-	I apply small adjustments to keep testing and training data to be consistent, and I split training datasets into one with predictors and another with response variables only. 
+
+I apply small adjustments to keep testing and training data to be consistent, and I split training datasets into one with predictors and another with response variables only. 
 
 ## Models Construction:
 For price prediction, I use both linear and non-linear approaches. For linear approaches, I run lasso and ridge regression. I pick these two models because they add penalty terms to avoid overfitting, and they take collinearity among variables into consideration. For non-linear approaches, I run decision tree and random forest, as they can handle regression task without problem, even though they are tree-based models. By comparing the MSE, and RMSE across the four models, I find that random forest performs the best, with the smallest mean MSE(0.038) and mean RMSE(0.196). So, I decide to use random forest for diamond price prediction
