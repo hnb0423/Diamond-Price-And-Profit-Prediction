@@ -1,0 +1,863 @@
+---
+title: "Diamond Analysis"
+author: "Naibo(Ray) Hu"
+date: "2/21/2022"
+output: html_document
+---
+```{r}
+# load packages
+library(dplyr)
+library(ggplot2)
+library(forecast)
+library(caret)
+library(class)
+library(dummies)
+library(ggplot2)
+library(glmnet)
+library(psych)
+library(tree)
+library(randomForest)
+library(party)
+library(janitor)
+```
+
+#### Load data
+```{r}
+#training data 
+data <- read.csv("training.csv")
+anyNA(data)
+```
+
+```{r}
+#offer data
+offer <- read.csv("offers.csv")
+anyNA(offer)
+```
+
+#### Check data type
+```{r}
+str(data)
+```
+
+```{r}
+str(offer)
+```
+
+# Data processing 
+### Step 1: convert variables to categorical variables
+```{r}
+# training
+names_d <- c("Cert", "Clarity", "Color", "Cut", "Known_Conflict_Diamond", "Polish", "Regions", "Shape", "Symmetry", "Vendor")
+data[,names_d] <- lapply(data[,names_d],factor)
+str(data)
+```
+```{r}
+# offer
+names_o <- c("Cert", "Clarity", "Color", "Cut", "Known_Conflict_Diamond", "Polish", "Regions", "Shape", "Symmetry", "Vendor")
+offer[,names_o] <- lapply(offer[,names_d],factor)
+str(offer)
+```
+### Step 2: Convert null values in cut column to NA
+```{r}
+# training
+data[data == "" | data == " "] <- NA  
+```
+
+```{r}
+# testing
+offer[offer == "" | offer == " "] <- NA  
+```
+### Step 3: Count number of missing values(N/A) by column
+```{r}
+# training
+data %>%
+  select(everything()) %>%
+  summarise_all(funs(sum(is.na(.))))
+# calculate percentage of missing of Cert column
+```
+
+```{r}
+# offer
+offer %>%
+  select(everything()) %>%
+  summarise_all(funs(sum(is.na(.))))
+```
+
+### Step 4: handling missing values
+For numeric variables with missing values, I decide to replace the missing values in Depth and Table with mean values of their columns.
+
+```{r}
+#replace N/A with mean in training
+data$Depth[is.na(data$Depth)]<-mean(data$Depth,na.rm=TRUE)
+data$Table[is.na(data$Table)]<-mean(data$Table,na.rm=TRUE)
+sum(is.na(data$Depth))
+sum(is.na(data$Table))
+```
+
+```{r}
+# replace N/A with mean in offer
+offer$Depth[is.na(offer$Depth)]<-mean(offer$Depth,na.rm=TRUE)
+offer$Table[is.na(offer$Table)]<-mean(offer$Table,na.rm=TRUE)
+
+sum(is.na(offer$Depth))
+sum(is.na(offer$Table))
+```
+
+For categorical variables with missing values, I count frequency of categories in each column.
+```{r}
+# count frequency in training
+data %>% count(Cut, sort = TRUE)
+data %>% count(Polish, sort = TRUE)
+data %>% count(Cert, sort = TRUE)
+data %>% count(Symmetry, sort = TRUE)
+```
+
+```{r}
+# count frequency in offer
+offer %>% count(Cut, sort = TRUE)
+offer %>% count(Polish, sort = TRUE)
+offer %>% count(Cert, sort = TRUE)
+offer %>% count(Symmetry, sort = TRUE)
+```
+I replace missing values in Polish, Cert, and Symmetry with most frequent classes. 
+```{r}
+# replace missing values in Polish, Cert, Symmetry with most frequent values in training 
+data$Polish[is.na(data$Polish)]<- "Excellent"
+data$Cert[is.na(data$Cert)]<- "AGSL"
+data$Symmetry[is.na(data$Symmetry)]<- "Excellent"
+
+sum(is.na(data$Polish))
+sum(is.na(data$Cert))
+sum(is.na(data$Symmetry))
+
+```
+
+```{r}
+# replace missing values in Polish, Cert, Symmetry with most frequent values in offer
+offer$Polish[is.na(offer$Polish)]<- "Excellent"
+offer$Cert[is.na(offer$Cert)]<- "AGSL"
+offer$Symmetry[is.na(offer$Symmetry)]<- "Excellent"
+sum(is.na(offer$Polish))
+sum(is.na(offer$Cert))
+sum(is.na(offer$Symmetry))
+```
+Cut columns have almost 50% missing values in both training and offer dataset. I decide to create a new category for these missing values called "Unknown." 
+```{r}
+sum(is.na(data$Cut))/nrow(data)
+sum(is.na(offer$Cut))/nrow(offer)
+```
+```{r}
+# replace missing in Cut with "Unknown" for training
+levels(data$Cut) <- c(levels(data$Cut), "Unknown")
+data$Cut[is.na(data$Cut)]<- "Unknown"
+```
+
+```{r}
+# replace missing in Cut with "Unknown" for offer
+levels(offer$Cut) <- c(levels(offer$Cut), "Unknown")
+offer$Cut[is.na(offer$Cut)]<- "Unknown"
+```
+
+### Step 5: Split Measurements column into seperate columns
+```{r}
+#Split Measurements column in training
+df_measure <- data.frame(do.call("rbind", strsplit(as.character(data$Measurements), "x", fixed = TRUE)))
+data$m_length <- df_measure$X1
+data$m_width <- df_measure$X2
+data$m_depth <- df_measure$X3
+
+# convert to numeric
+data$m_length <- as.numeric(as.factor(data$m_length))
+data$m_width <- as.numeric(as.factor(data$m_depth))
+data$m_depth <- as.numeric(as.factor(data$m_width))
+```
+
+
+```{r}
+#Split Measurements column in offer
+df_measure_o <- data.frame(do.call("rbind", strsplit(as.character(offer$Measurements), "x", fixed = TRUE)))
+offer$m_length <- df_measure_o$X1
+offer$m_width <- df_measure_o$X2
+offer$m_depth <- df_measure_o$X3
+
+# convert to numeric
+offer$m_length <- as.numeric(as.factor(offer$m_length))
+offer$m_width <- as.numeric(as.factor(offer$m_width))
+offer$m_depth <- as.numeric(as.factor(offer$m_depth))
+```
+
+
+### Step 6: Drop not useful columns
+Drop Know_Conflict_Diamond in both traning and offer dataset since there are too many missing values in this column in offer data. Also drop Measurements column. 
+```{r}
+# drop Know_Conflict_Diamond in training
+data <- subset(data, select = -c(Known_Conflict_Diamond, Measurements))
+```
+
+```{r}
+# drop Know_Conflict_Diamond and Offers columns in offer
+offer <- subset(offer, select = -c(Known_Conflict_Diamond,Offers, Measurements))
+```
+
+### Step 7: create profit and logprofit column in training data
+```{r}
+# create profit columns in training
+data$Logprofit <- data$LogRetail- data$LogPrice
+data$profit <- data$Retail - data$Price
+```
+
+```{r}
+# check missing values
+anyNA(data)
+anyNA(offer)
+```
+
+# EDA on training data
+```{r}
+# create a new column to calculate profit margin
+# (price - retail)/retail
+train_eda <- data
+train_eda$profit_margin <- train_eda$profit/ train_eda$Retail
+
+# subset datasets by vendor
+v1 <- filter(train_eda, Vendor == 1)
+v2 <- filter(train_eda, Vendor == 2)
+v3 <- filter(train_eda, Vendor == 3)
+v4 <- filter(train_eda, Vendor == 4)
+```
+
+## Vendor analysis for short answer problems
+#### 1. Do you think that any of the vendors are over or under charging for diamonds compared to the other vendors? Do you think they are selling the same kind of diamonds? How did you come to this conclusion?
+I construct a density plot showing profit margin by each vendor and find that most diamonds traded with vendor 4 have a profit margin around 25%, which is the least amount compared to other vendors. I also calculate the mean profit margins by each vendor and find that vendor 4 has -0.045% mean profit margin. Thus, Vendor 4 is overcharging, and I should not trade with this vendor in the future. 
+```{r}
+# Density plot of profit margin by vendors
+train_eda%>%
+  ggplot(aes(x=profit_margin, fill=Vendor)) +
+  geom_density(alpha=.5)+ 
+  labs(subtitle="Diamond profit margin by Vendors") +
+  xlim(-0.5,0.5)
+```
+
+```{r}
+# table of mean profit margin by vendor
+aggregate(train_eda$profit_margin, by=list(Vendor=train_eda$Vendor), FUN=mean)
+```
+
+
+I build four histograms to visualize the distribution of diamond price by each vendor. Vendor 1 sells relatively cheap diamonds with an average price of 2363.48. Vendor 3 sells more expensive diamonds than Vendor 1 and has an average diamond price of 10278.Vendor 4 sells more expensive diamonds than Vendor 3 and Vendor 1 and has an average diamond price of 10278.1. Finally, vendor 2 sells expensive high-end diamonds that other vendors do not have, as Vendor 2 has diamonds with a wide price range. Vendor 2 also has the highest average diamond price, which is27123.471. So, the four vendors do not sell the same kind of diamonds
+
+```{r}
+# Distribution of diamond price by vendor 
+par(mfrow=c(2,2))
+hist(v1$Price, main = "Price Historgam Vendor1", col = rgb(1,0,0,0.5))
+abline(v = mean(v1$Price), col = "blue", lwd = 2)
+
+hist(v2$Price, main = "Price Historgam Vendor2", col = rgb(1,0,0,0.5), xlim = c(0,200000), ylim = c(0,2500), breaks = 50)
+abline(v = mean(v2$Price), col = "blue", lwd = 2)
+
+hist(v3$Price, main = "Price Historgam Vendor3", col = rgb(1,0,0,0.5))
+abline(v = mean(v3$Price), col = "blue", lwd = 2)
+
+hist(v4$Price, main = "Price Historgam Vendor4", col = rgb(1,0,0,0.5))
+abline(v = mean(v4$Price), col = "blue", lwd = 2)
+```
+```{r}
+# average diamond price by vendors
+aggregate(data$Price, by=list(Vendor=data$Vendor), FUN=mean)
+```
+
+In addition, I investigate diamond carats by vendors, and I find that most diamonds sold by Vendor 1 are below 1 Carets, and most diamonds sold by Vendor 3 and Vendor 4 are between 1 to 2 Carats. Only Vendor 4 sells many diamonds greater than 2.5 Carats. Again, this graph shows that the four vendors do not sell the same kind of diamonds.
+```{r}
+# Density plot of carats by vendors
+data%>%
+  ggplot(aes(x=Carats, fill=Vendor)) +
+  geom_density(alpha=.5)+ 
+  labs(subtitle="Diamond Carats by Vendors") +
+  xlim(0, 8)
+
+```
+
+#### 2. What is the relationship between Carat and Retail Price? Why do you think the relationship takes this form?
+Both retail price and log retail price show a positive linear relationship with Carets. The correlations are 0.716 and 0.781. The larger the Carets, the higher the price. The log transformation reduces or removes the skewness of our original data, and lower the impact of extreme values. So, we see a higher correlation between log price and Caret.  
+
+```{r}
+par(mfrow=c(1,2))
+plot(data$Carats, data$Retail, main = "Carats vs Retail Price",
+     xlab = "Carats", ylab = "Price",
+     pch = 19, frame = FALSE)
+abline(lm(Retail ~ Carats, data = data), col = "blue")
+plot(data$Carats, data$LogRetail, main = " Carats vs Log Retail Price",
+     xlab = "Carats", ylab = "Log Price",
+     pch = 19, frame = FALSE)
+abline(lm(LogRetail ~ Carats, data = data), col = "blue")
+```
+
+```{r}
+# correlation calculation 
+cor(data$Retail, data$Carats)
+cor(data$LogRetail, data$Carats)
+```
+From the scatterplot matrix, I find that there are strong correlations among predictors m_length, m_width, m_depth, and Carats which indicate multicollinearity.Thus, instead of using linear regression, I decide to use lasso and ridge regression. Both models apply regularization techniques, reducing variance by either introducing bias or prohibiting size of coefficient to close to zero. Lasso and ridge regression can effectively reduce the problem of overfitting. 
+
+```{r}
+#scatterplot matrix among predictors
+pairs ( ~ Carats + Cert + Clarity + Color + Cut + Polish + Regions + Shape + Symmetry + Vendor+  Depth + Table + m_length + m_width + m_depth, data)
+```
+
+
+# Feature Engineering 
+## Step 1: re-categorize columns 
+I notice that Color, Clarity, Symmetry, Shape, Polish columns have different categories in training and offer datasets. So, I need to re-categorize these five columns.
+```{r}
+# count frequency for color column in training 
+data %>% count(Color, sort = TRUE)
+
+# count frequency for color column in training 
+offer %>% count(Color, sort = TRUE)
+```
+
+```{r}
+# select top frequent color and replace other colors with "Other" in training data
+color_name <- c("G", "I", "H", "E", "F","J", "D", "K", "L", "M")
+data$Color <- as.character(data$Color)
+data_other <- !(data$Color%in% color_name )
+data$Color[data_other] <- "Other"
+data$Color <- as.factor(data$Color)
+```
+
+```{r}
+# select top frequent color and replace others with "Other" in offer data
+offer$Color <- as.character(offer$Color)
+offer_other <- !(offer$Color%in% color_name )
+offer$Color[offer_other] <- "Other"
+offer$Color <- as.factor(offer$Color)
+```
+
+
+```{r}
+# count frequency for clarity column in training
+data %>% count(Clarity, sort = TRUE)
+
+# count frequency for clarity column in training
+offer %>% count(Clarity, sort = TRUE)
+```
+
+```{r}
+# select top frequent clarity and replace other clarity with "Other" in training data
+clarity_name <- c("SI2", "SI1", "VS2", "VS1", "VVS2","VVS1", "IF", "I1")
+data$Clarity <- as.character(data$Clarity)
+data_other_clarity <- !(data$Clarity %in% clarity_name)
+data$Clarity[data_other_clarity] <- "Other"
+data$Clarity <- as.factor(data$Clarity)
+```
+
+```{r}
+# select top frequent clarity and replace other clarity with "Other" in offer data
+offer$Clarity <- as.character(offer$Clarity)
+offer_other_clarity <- !(offer$Clarity %in% clarity_name)
+offer$Clarity[offer_other_clarity] <- "Other"
+offer$Clarity <- as.factor(offer$Clarity)
+```
+
+
+```{r}
+# count frequency for Symmetry column in training
+data %>% count(Symmetry, sort = TRUE)
+
+# count frequency for Symmetry column in training
+offer %>% count(Symmetry, sort = TRUE)
+```
+
+```{r}
+# select top frequent Symmetry and replace other Symmetry levels with "Other" in training data
+symmetry_name <- c("Excellent", "Very good", "Good")
+data$Symmetry <- as.character(data$Symmetry)
+data_other_symmetry <- !(data$Symmetry %in% symmetry_name)
+data$Symmetry[data_other_symmetry] <- "Other"
+data$Symmetry <- as.factor(data$Symmetry)
+```
+
+```{r}
+# select top frequent Symmetry and replace other Symmetry levels with "Other" in offer data
+offer$Symmetry <- as.character(offer$Symmetry)
+offer_other_symmetry <- !(offer$Symmetry %in% symmetry_name)
+offer$Symmetry[offer_other_symmetry] <- "Other"
+offer$Symmetry <- as.factor(offer$Symmetry)
+```
+
+```{r}
+# count frequency for Polish column in training 
+data %>% count(Polish, sort = TRUE)
+
+# count frequency for color column in training 
+offer %>% count(Polish, sort = TRUE)
+```
+
+```{r}
+# replace Polish "Fair" with "Good" in offer data
+offer$Polish[offer$Polish =="Fair"]<- "Good"
+```
+
+
+
+```{r}
+# count frequency for clarity column in training
+data %>% count(Shape, sort = TRUE)
+
+# count frequency for clarity column in training
+offer %>% count(Shape, sort = TRUE)
+```
+
+```{r}
+# replace Shape "ROUND" with "Round" in training data
+data$Shape[data$Shape == "ROUND"]<- "Round"
+
+# replace Shape "Oval " with "Oval" in training data
+data$Shape[data$Shape == "Oval "]<- "Oval"
+```
+
+```{r}
+# replace Shape "ROUND" with "Round" in offer data
+offer$Shape[offer$Shape == "ROUND"]<- "Round"
+
+# replace Shape "Oval " with "Oval" in training data
+offer$Shape[offer$Shape == "Oval "]<- "Oval"
+```
+
+
+## Step 2: create dummy vairables for categorical variables in both data and offer datasets 
+```{r}
+# dummy code training 
+data_dummy <- dummyVars("~.", data = data)
+data_w_dummy <- data.frame(predict(data_dummy, newdata = data))
+```
+
+```{r}
+# dummy code offer
+offer_dummy <- dummyVars("~.", data = offer)
+offer_w_dummy <- data.frame(predict(offer_dummy, newdata = offer))
+```
+
+## Step 3: remove retail price, log retail price, profit, log profit, and price columns in training
+```{r}
+data_d_price = subset(data_w_dummy, select = -c(Price, Retail, profit, Logprofit, LogRetail))
+```
+
+## Step 4: rename dummy column names in both datasets 
+```{r}
+#training
+data_d_price<- clean_names(data_d_price)
+
+#offer
+offer_w_dummy <- clean_names(offer_w_dummy)
+```
+
+## Step 5: Column Polish, Symmetry, and Cut dummies have unnecessnary columns. 
+```{r}
+# train
+data_d_price = subset(data_d_price, select = -c(cut,polish,id))
+
+#offer 
+offer_w_dummy = subset(offer_w_dummy, select = -c(cut,polish,id,polish_fair))
+```
+
+## Step 6: Split the training dataset into two datasets: one with predictors, and the other with response 
+```{r}
+# training
+data_d_price_predictors = subset(data_d_price, select = -c(log_price))
+data_d_price_response = subset(data_d_price, select = c(log_price))
+```
+
+
+# Models: Predict Log Price
+I decide to use Log Price as response variable since log function effective scale the data to lower the impact of extreme values. 
+
+## 1. Linear Lasso Regression Model
+To reduce issue of overfitting, I decide to apply k-fold cross validation to training data. I find the optimal lambda is 0.00108, and the optimal log lambda to be -6.833. Out of 68 total predictors, Lasso regression only keeps 35 of them. Since I care about prediction accuracy, I look into cross validation MSE and RMSE mean error, which are 0.1934 and 0.3711. 
+
+```{r}
+# 10-fold cross-validation by default
+set.seed(1234)
+model1_lasso <- cv.glmnet(as.matrix(data_d_price_predictors), as.matrix(data_d_price_response), alpha = 1, family = "gaussian", standardize = TRUE, type.measure = "mse")
+
+#find optimal lambda value that minimizes test MSE
+best_lambda_lasso <- model1_lasso$lambda.min
+best_lambda_lasso
+log(best_lambda_lasso)
+
+# find lambda value having 1 standard error from minimal MSE
+lambda_1se_lasso <- model1_lasso$lambda.1se
+lambda_1se_lasso
+log(lambda_1se_lasso)
+```
+```{r}
+#produce plot of test MSE by lambda value
+plot(model1_lasso) 
+```
+```{r}
+# coefficient from lasso regression
+lasso_coeff = coef(model1_lasso, s=model1_lasso$lambda.1se)
+lasso_coeff
+# selected coefficients
+selected_lasso_coeff = data.frame(name = lasso_coeff@Dimnames[[1]][lasso_coeff@i + 1], coefficient = lasso_coeff@x)
+selected_lasso_coeff
+```
+
+```{r}
+#lasso MSE
+#cross validation error
+summary(model1_lasso$cvm)
+
+#lasso RMSE
+summary(sqrt(model1_lasso$cvm))
+```
+## 2. Ridge Regression
+For ridge regression, I find the optimal lambda is 0.1156, and the optimal log lambda to be -2.16. Ridge regression keeps all 68 predictors. The cross validation MSE and RMSE mean error for ridge are 0.7423 and 0.7700.  
+
+```{r}
+# cross validation: 10 folds default
+set.seed(1234)
+model2_ridge <- cv.glmnet(as.matrix(data_d_price_predictors), as.matrix(data_d_price_response), alpha = 0, family = "gaussian", standardize = TRUE, type.measure = "mse")
+
+#find optimal lambda value that minimizes test MSE
+best_lambda_ridge <- model2_ridge$lambda.min
+best_lambda_ridge
+log(best_lambda_ridge)
+
+# find lambda value having 1 standard error from minimal MSE
+lambda_1se_ridge <- model2_ridge$lambda.1se
+lambda_1se_ridge
+log(lambda_1se_ridge)
+```
+
+```{r}
+#plot
+plot(model2_ridge)
+```
+
+```{r}
+# coefficient from lasso regression
+ridge_coeff <- coef(model2_ridge, s=model2_ridge$lambda.1se)
+ridge_coeff
+
+# selected ridge coefficients
+selected_ridge_coeff <- data.frame(name = ridge_coeff@Dimnames[[1]][ridge_coeff@i + 1], coefficient <- ridge_coeff@x)
+selected_ridge_coeff
+```
+
+```{r}
+#Ridge MSE
+#cross validation error
+
+summary(model2_ridge$cvm)
+
+#Ridge RMSE
+summary(sqrt(model2_ridge$cvm))
+```
+
+## 3 Decision Tree 
+Decision tree does not perform well, as it generates high mean deviance (3793) and RMSE (56.74). Thus, I will not consider this model for price prediction. 
+
+```{r}
+model3_tree <- tree(log_price ~ ., data_d_price)
+```
+
+```{r}
+# plot the tree
+plot(model3_tree)
+text(model3_tree, pretty = 0)
+```
+
+
+```{r}
+# cross validation for pruning the tree
+cv_tree <- cv.tree(model3_tree)
+#names(cv_tree)
+
+# plot of tree size vs deviance (MSE)
+plot(cv_tree$size, cv_tree$dev, type = "b", xlab = "Size", ylab = "MSE")
+```
+
+
+
+### There is no need to prune the tree in this case
+```{r}
+which.min(cv_tree$dev)
+cv_tree$size[1]
+```
+
+
+```{r}
+# decision tree MSE
+summary(cv_tree$dev)
+
+# decision tree RMSE 
+summary(sqrt(cv_tree$dev))
+```
+
+## 4 Random Forest
+I apply random Forest model with 500 decision trees, and the mean MSE is 0.03876 RMSE is 0.1960.
+```{r}
+model4_random <- randomForest(log_price ~ ., data = data_d_price, mtry = 10,
+                         importance = TRUE, na.action = na.omit)
+```
+
+
+```{r}
+# Plot the error vs the number of trees graph
+plot(model4_random)
+```
+
+
+Through variable importance analysis, I find that Clarity, Color, Carats, depth, width, length, and vendors are important factors impacting diamond prices. The %IncMSE and IncNodePurity values for these variables are high. 
+```{r}
+# variable importance for random forest
+random_import <- importance(model4_random)
+random_import
+```
+```{r}
+# Random Forest MSE
+summary(model4_random$mse)
+
+# Random Forest MSE
+summary(sqrt(model4_random$mse))
+
+# Random Forest MSE
+summary(model4_random$rsq)
+```
+
+###  By comparing the RMSE values accross the four models for price prediction, random forest performs the best, having the lowest mean RMSE values, which is 0.1960. Decision tree, however, performs the worst, with the mean RMSE being 56.74. So, I will use the random forest model for diamond price prediction in testing dataset.
+
+```{r}
+# random forest price prediction on offer data
+# predicted diamond log price
+pred_logprice_rf <- predict(model4_random, offer_w_dummy)
+
+# predicted diamond price
+pred_price_rf <- exp(pred_logprice_rf)
+```
+
+# Models: Predict Log Retail Price
+I will use random forest, lasso regression, and ridge regression for log retail prediction
+```{r}
+# add log profit column to data_d_price data (training)
+retail <- subset(data_w_dummy, select = c(LogRetail))
+
+# training dataset with profit column
+data_d_price <- cbind(data_d_price, retail)
+data_d_retail <- subset(data_d_price, select = -c(log_price))
+```
+
+### Split training data into two datasets: one with predictors and one with response variable 
+```{r}
+# data split for training
+data_d_retail_predictors <- subset(data_d_retail, select = -c(LogRetail))
+data_d_retail_response <- subset(data_d_retail, select = c(LogRetail))
+```
+
+## 1 Random Forest
+```{r}
+model5_random <- randomForest(LogRetail ~ ., data = data_d_retail, mtry = 10,
+                         importance = TRUE, na.action = na.omit)
+```
+
+```{r}
+# Plot the error vs the number of trees graph
+plot(model5_random)
+```
+
+
+```{r}
+# variable importance for random forest
+random_import <- importance(model5_random)
+random_import
+```
+
+```{r}
+# Random Forest MSE
+summary(model5_random$mse)
+
+# Random Forest RMSE
+summary(sqrt(model5_random$mse))
+
+# Random Forest Rsquared
+summary(model5_random$rsq)
+```
+
+## 2. Lasso Rgression
+```{r}
+# 10-fold cross-validation by default
+set.seed(1234)
+model6_lasso <- cv.glmnet(as.matrix(data_d_retail_predictors), as.matrix(data_d_retail_response), alpha = 1, family = "gaussian", standardize = TRUE, type.measure = "mse")
+
+#find optimal lambda value that minimizes test MSE
+best_lambda_lasso <- model6_lasso$lambda.min
+best_lambda_lasso
+log(best_lambda_lasso)
+
+# find lambda value having 1 standard error from minimal MSE
+lambda_1se_lasso <- model6_lasso$lambda.1se
+lambda_1se_lasso
+log(lambda_1se_lasso)
+```
+
+```{r}
+#produce plot of test MSE by lambda value
+plot(model6_lasso) 
+```
+```{r}
+# coefficient from lasso regression
+lasso_coeff <- coef(model6_lasso, s=model6_lasso$lambda.1se)
+lasso_coeff
+# selected coefficients
+selected_lasso_coeff <- data.frame(name = lasso_coeff@Dimnames[[1]][lasso_coeff@i + 1], coefficient = lasso_coeff@x)
+selected_lasso_coeff
+```
+
+```{r}
+#Lasso MSE
+#cross validation error
+summary(model6_lasso$cvm)
+
+#Lasso RMSE
+summary(sqrt(model6_lasso$cvm))
+```
+## 3 Ridge Regression
+```{r}
+# cross validation: 10 folds default
+set.seed(1234)
+model7_ridge <- cv.glmnet(as.matrix(data_d_retail_predictors), as.matrix(data_d_retail_response), alpha = 0, family = "gaussian", standardize = TRUE, type.measure = "mse")
+
+#find optimal lambda value that minimizes test MSE
+best_lambda_ridge <- model7_ridge$lambda.min
+best_lambda_ridge
+log(best_lambda_ridge)
+
+# find lambda value having 1 standard error from minimal MSE
+lambda_1se_ridge <- model7_ridge$lambda.1se
+lambda_1se_ridge
+log(lambda_1se_ridge)
+```
+
+```{r}
+#plot
+plot(model7_ridge)
+```
+
+```{r}
+# coefficient from lasso regression
+ridge_coeff <- coef(model7_ridge, s=model7_ridge$lambda.1se)
+ridge_coeff
+
+# selected ridge coefficients
+selected_ridge_coeff <- data.frame(name = ridge_coeff@Dimnames[[1]][ridge_coeff@i + 1], coefficient <- ridge_coeff@x)
+selected_ridge_coeff
+```
+
+```{r}
+#Ridge MSE
+#cross validation error
+summary(model7_ridge$cvm)
+
+#Ridge RMSE
+summary(sqrt(model7_ridge$cvm))
+```
+
+###  By comparing the RMSE values accross the three models for profit prediction, random forest performs the best, having the lowest mean RMSE values, which is 0.4931. So, I will use the random forest for diamond reatil price prediction in testing(offer) dataset.
+
+```{r}
+# random forest log retail price prediction on offer data
+# predicted diamond log retail price
+pred_logretail_rf <- predict(model5_random, offer_w_dummy)
+
+# predicted diamond price
+pred_retail_rf <- exp(pred_logretail_rf)
+```
+
+# Diamond Profit Analysis on offer dataset
+## Calculation of predicted profit for diamond in offer dataset
+```{r}
+# attach predicted column to offer dataset
+offer$price <- pred_price_rf
+offer$retail <- pred_retail_rf
+```
+
+```{r}
+# calculate predicted profit for each diamond in offer dataset
+offer$profit <- offer$retail - offer$price
+```
+
+```{r}
+# calculate diamond profit margin
+profit_margin <- offer$profit/ offer$retail
+offer$profit_margin <- profit_margin
+```
+
+### From the EDA section, I find that vendor 4 generate lowest mean profit margin. So I will not take vendor 4 into consideration for purchasing diamonds. 
+
+```{r}
+# Only look at vendor1, vendor2, vendor3
+offer_list <- filter(offer, Vendor!= 4)
+sum(offer_list$price)
+```
+
+### Also, I want to select diamonds with at least 25% profit margin. Since, I only have $5,000,000 budget, I decide to select diamonds based on high profit margins in descending order. 
+```{r}
+# find diamonds with profit margin greater than 25%
+offer_list <- filter(offer, profit_margin > 0.25)
+sum(offer_list$price)
+```
+```{r}
+# sort the offer list based on profit_margin indescending order
+offer_list <-offer_list[order(-offer_list$profit_margin),]
+```
+
+
+```{r}
+# count number of diamonds to trade before reaching budget
+sum_money <- 0
+count <- 0
+for (value in offer_list$price) {
+  sum_money <- sum_money + value
+  count <- count + 1
+
+  if (sum_money > 5000000) {
+    break
+  }
+}
+print(count)
+```
+
+# Select the diamond list for trade
+```{r}
+# the list diamond to trade
+final_offer <- offer_list[1:699,]
+final_offer <- subset(final_offer, select = c(id, price, profit_margin))
+
+# Cost of these diamonds
+sum(final_offer$price)
+```
+```{r}
+# original offer dataset
+offer_original <- read.csv("offers.csv")
+```
+
+```{r}
+# left join original offer and final_offer datasets
+Offers_list <-merge(x=offer_original, y=final_offer, by="id",all.x=TRUE)
+Offers_list <- subset(Offers_list, select = -c(profit_margin, Offers))
+
+# rename price column to Offers
+names(Offers_list)[names(Offers_list) == "price"] <- "Offers"
+```
+
+```{r}
+# total sum of predicted price
+sum(Offers_list$Offers, na.rm = TRUE)
+```
+
+```{r}
+# export dataset to csv
+# write.csv(Offers_list, "offers.csv", row.names=FALSE)
+```
+
