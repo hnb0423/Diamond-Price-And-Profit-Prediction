@@ -6,25 +6,32 @@ The goal of this project is to predict diamond trade price and generate most amo
 I take seven steps to finish data processing.
 	    
 Step 1: Convert data type
+
 After checking data types in the “training” and “offers” dataset, I convert variables, "Cert", "Clarity", "Color", "Cut", "Known_Conflict_Diamond", "Polish", "Regions", "Shape", "Symmetry", "Vendor", into categorical variables.  
  
 Step 2: Convert null to N/A
-            For both datasets, I convert null values in “Cut” column to N/A
+
+For both datasets, I convert null values in “Cut” column to N/A
 	    
 Step 3: Count missing values
-            For both datasets, I count number of missing values (N/A) by each column
+
+For both datasets, I count number of missing values (N/A) by each column
 	    
 Step 4: Handling missing values 
-            For numeric variables, “Depth” and “Table,” in both datasets, I replace the missing values with mean values of the columns. For categorical variables, “Cut”, “Polish”, “Cert”, and “Symmetry” in both datasets, I count the frequency of categories in each column. Then, I replace missing values in “Polish,” “Cert,” and “Symmetry” with most frequent classes in their columns. Since column “Cut” has almost 50% of missing value, I decide to create a new category called “Unknown” and replace the missing values with “Unknown” for both datasets.  
+
+For numeric variables, “Depth” and “Table,” in both datasets, I replace the missing values with mean values of the columns. For categorical variables, “Cut”, “Polish”, “Cert”, and “Symmetry” in both datasets, I count the frequency of categories in each column. Then, I replace missing values in “Polish,” “Cert,” and “Symmetry” with most frequent classes in their columns. Since column “Cut” has almost 50% of missing value, I decide to create a new category called “Unknown” and replace the missing values with “Unknown” for both datasets.  
  
 Step 5: Split Measurements column into separate columns 
-            For both datasets, I split the “Measurements” column into three separate columns called “m_length,” “m_depth,” and “m_width.”
+
+For both datasets, I split the “Measurements” column into three separate columns called “m_length,” “m_depth,” and “m_width.”
  
 Step 6: Drop not useful columns
-            In the “offers dataset, most values in the “Know_Conflict_Diamond” column are missing. Thus, I decide to drop the ““Know_Conflict_Diamond” column in both datasets.
+
+In the “offers dataset, most values in the “Know_Conflict_Diamond” column are missing. Thus, I decide to drop the ““Know_Conflict_Diamond” column in both datasets.
  
 Step 7: create profit and logprofit column in training dataset
-            I create “profit” and “Logprofit” columns through the calculation of column “Retail” minus “Price.”
+
+I create “profit” and “Logprofit” columns through the calculation of column “Retail” minus “Price.”
  
 ## EDA on training data:
 I conduct detailed vendor analysis in this section. First, I calculate profit margin through the formula (Retail – Price)/ Retail. I build a density plot of profit margin by each vendor to study the vendors who bring us low profit margins. In this way, I can determine which vendors are overcharging or undercharging. 
